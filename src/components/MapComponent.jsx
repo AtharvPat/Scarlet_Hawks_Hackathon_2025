@@ -18,35 +18,38 @@ import {
   YAxis,
   ResponsiveContainer,
   CartesianGrid,
+  LineChart,
+  Line,
 } from "recharts";
 
 const COLORS = ["#0088FE", "#FF8042"];
 const MONTHS = [
-  "Jan",
-  "Feb",
-  "Mar",
-  "Apr",
-  "May",
-  "Jun",
-  "Jul",
-  "Aug",
-  "Sep",
-  "Oct",
-  "Nov",
-  "Dec",
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ];
 
 const MapComponent = () => {
+  // Existing state variables
   const [selectedPlace, setSelectedPlace] = useState(null);
   const [markerPosition, setMarkerPosition] = useState(null);
   const [solarData, setSolarData] = useState([]);
   const [matchedData, setMatchedData] = useState(null);
   const [selectedMonth, setSelectedMonth] = useState("May");
   const [predictionResult, setPredictionResult] = useState(null);
-  
-  // New state variables for calculator
-  const [panelArea, setPanelArea] = useState(25); // Default values to make testing easier
-  const [monthlyBill, setMonthlyBill] = useState(150); // Default values to make testing easier
+  // New state for map zoom level
+  const [mapZoom, setMapZoom] = useState(13);
+
+  // Dropdown toggles for right panel
+  const [showCalculator, setShowCalculator] = useState(false);
+  const [showInstallation, setShowInstallation] = useState(false);
+  const [showAnalysis, setShowAnalysis] = useState(false);
+
+  // Month slider state (using the month index)
+  const [monthIndex, setMonthIndex] = useState(MONTHS.indexOf("May"));
+
+  // Personal Solar Calculator state
+  const [panelArea, setPanelArea] = useState(5);
+  const [monthlyBill, setMonthlyBill] = useState(40);
   const [calculatedResults, setCalculatedResults] = useState({
     annualEnergy: 0,
     carbonOffset: 0,
@@ -55,10 +58,18 @@ const MapComponent = () => {
     monthlySavingMoney: 0,
   });
 
+  // Solar Potential Analysis state
+  const [analysisMonthlyBill, setAnalysisMonthlyBill] = useState(100); // $ per month
+  const [energyCostPerKWh, setEnergyCostPerKWh] = useState(0.15); // $ per kWh
+  const [solarIncentives, setSolarIncentives] = useState(40); // percentage discount
+  const [panelCapacityWatts, setPanelCapacityWatts] = useState(300); // watts per panel
+  const [panelCount, setPanelCount] = useState(10); // number of panels
+  const [installationCostPerWatt, setInstallationCostPerWatt] = useState(4); // cost per watt in $
+
   const autocompleteRef = useRef(null);
 
   const { isLoaded } = useJsApiLoader({
-    googleMapsApiKey: "Add your API key here",
+    googleMapsApiKey: "Put-your-API-Key-Here",
     libraries: ["places"],
   });
 
@@ -74,33 +85,17 @@ const MapComponent = () => {
       );
   }, []);
 
-  // New effect to calculate results whenever panel area, monthly bill or prediction result changes
+  // Recalculate Personal Solar Calculator values
   useEffect(() => {
-    // Default prediction value if none available yet (for testing visibility)
-    const solarEnergyValue = predictionResult || 4.5; // Average value of 4.5 kWh/m² as fallback
-    
+    const solarEnergyValue = predictionResult || 4.5;
     if (panelArea > 0 && monthlyBill > 0) {
-      // Assume average electricity rate of $0.15 per kWh
       const electricityRate = 0.15;
-      
-      // Calculate monthly kWh usage from bill
       const monthlyUsage = monthlyBill / electricityRate;
-      
-      // Calculate annual energy production based on panel area and predicted solar energy
-      const annualEnergy = panelArea * solarEnergyValue * 365;
-      
-      // Carbon offset calculation (0.85 lbs CO2 per kWh)
-      const carbonOffset = (annualEnergy * 0.85) / 2000; // Convert to tons
-      
-      // Tree equivalent (1 tree absorbs about 48 lbs of CO2 per year)
+      const annualEnergy = solarEnergyValue * panelArea * 0.18 * 365;
+      const carbonOffset = (annualEnergy * 0.85) / 2000;
       const treeEquivalent = Math.round((carbonOffset * 2000) / 48);
-      
-      // Monthly energy saving in kWh (capped at monthly usage)
       const monthlySavingKWh = Math.min(annualEnergy / 12, monthlyUsage);
-      
-      // Monthly money saving
       const monthlySavingMoney = monthlySavingKWh * electricityRate;
-      
       setCalculatedResults({
         annualEnergy: annualEnergy.toFixed(2),
         carbonOffset: carbonOffset.toFixed(2),
@@ -111,6 +106,35 @@ const MapComponent = () => {
     }
   }, [panelArea, monthlyBill, predictionResult]);
 
+  // Solar Potential Analysis Calculations
+  const avgSunHours = 4;
+  const totalCapacityWatts = panelCount * panelCapacityWatts;
+  const yearlyProduction = (totalCapacityWatts / 1000) * avgSunHours * 365;
+  const monthlyConsumption = analysisMonthlyBill / energyCostPerKWh;
+  const yearlyConsumption = monthlyConsumption * 12;
+  const energyCoveredFraction = Math.min(yearlyProduction / yearlyConsumption, 1);
+  const installationCost = totalCapacityWatts * installationCostPerWatt;
+  const netInstallationCost = installationCost * (1 - solarIncentives / 100);
+
+  let breakEvenYear = null;
+  const analysisData = [];
+  for (let y = 0; y <= 20; y++) {
+    const costWithoutSolar = analysisMonthlyBill * 12 * y;
+    const costWithSolar =
+      netInstallationCost + analysisMonthlyBill * (1 - energyCoveredFraction) * 12 * y;
+    const savings = costWithoutSolar - costWithSolar;
+    analysisData.push({
+      year: y,
+      costWithoutSolar,
+      costWithSolar,
+      savings,
+    });
+    if (breakEvenYear === null && costWithSolar <= costWithoutSolar) {
+      breakEvenYear = y;
+    }
+  }
+
+  // Helper to calculate sine and cosine features
   const getMonthFeatures = (monthLabel) => {
     const index = MONTHS.indexOf(monthLabel);
     const angle = (2 * Math.PI * index) / 12;
@@ -127,11 +151,9 @@ const MapComponent = () => {
       const regionName = place.address_components?.find((c) =>
         c.types.includes("locality")
       )?.long_name;
-
       const lat = loc.lat();
       const lng = loc.lng();
-
-      const { sin, cos } = getMonthFeatures(selectedMonth || "May");
+      const { sin, cos } = getMonthFeatures(selectedMonth);
 
       try {
         const res = await axios.post("http://localhost:5000/predict", {
@@ -151,13 +173,11 @@ const MapComponent = () => {
       setSelectedPlace({
         name: place.name || "No name",
         address: place.formatted_address || "No address",
-        coordinates: {
-          lat,
-          lng,
-        },
+        coordinates: { lat, lng },
       });
-
       setMarkerPosition({ lat, lng });
+      // Zoom into the location when found
+      setMapZoom(19);
 
       const match = solarData.find(
         (entry) =>
@@ -167,14 +187,14 @@ const MapComponent = () => {
     }
   };
 
-  const handleMonthChange = (e) => {
-    const newMonth = e.target.value;
-    setSelectedMonth(newMonth);
-
-    // Re-trigger prediction if a place is already selected
+  const handleMonthSliderChange = (e) => {
+    const index = parseInt(e.target.value, 10);
+    setMonthIndex(index);
+    const month = MONTHS[index];
+    setSelectedMonth(month);
     if (selectedPlace) {
       const { lat, lng } = selectedPlace.coordinates;
-      const { sin, cos } = getMonthFeatures(newMonth);
+      const { sin, cos } = getMonthFeatures(month);
       axios
         .post("http://localhost:5000/predict", {
           Latitude: lat,
@@ -189,7 +209,6 @@ const MapComponent = () => {
     }
   };
 
-  // Handlers for new input fields
   const handlePanelAreaChange = (e) => {
     setPanelArea(parseFloat(e.target.value) || 0);
   };
@@ -198,30 +217,57 @@ const MapComponent = () => {
     setMonthlyBill(parseFloat(e.target.value) || 0);
   };
 
+  const handleAnalysisMonthlyBillChange = (e) => {
+    setAnalysisMonthlyBill(parseFloat(e.target.value) || 0);
+  };
+
+  const handleEnergyCostChange = (e) => {
+    setEnergyCostPerKWh(parseFloat(e.target.value) || 0);
+  };
+
+  const handleSolarIncentivesChange = (e) => {
+    setSolarIncentives(parseFloat(e.target.value) || 0);
+  };
+
+  const handlePanelCapacityChange = (e) => {
+    setPanelCapacityWatts(parseFloat(e.target.value) || 0);
+  };
+
+  const handlePanelCountChange = (e) => {
+    setPanelCount(parseInt(e.target.value, 10) || 1);
+  };
+
+  const handleInstallationCostChange = (e) => {
+    setInstallationCostPerWatt(parseFloat(e.target.value) || 0);
+  };
+
+  const toggleCalculator = () => setShowCalculator((prev) => !prev);
+  const toggleInstallation = () => setShowInstallation((prev) => !prev);
+  const toggleAnalysis = () => setShowAnalysis((prev) => !prev);
+
   if (!isLoaded) return <div>Loading...</div>;
 
   return (
     <div
       style={{
-        height: "auto", // Changed from conditional to always be auto
         display: "flex",
-        flexDirection: "column",
+        width: "100%",
+        height: "95vh",
+        margin: 0,
+        padding: 0,
+        marginTop: "2vh",
       }}
     >
-      <div
-        style={{
-          height: "70vh", // Fixed height for map
-          position: "relative",
-        }}
-      >
+      {/* Left Column: Map with Month Slider and Selected Place Card */}
+      <div style={{ flex: 2, position: "relative" }}>
         <GoogleMap
           center={markerPosition || { lat: 41.8781, lng: -87.6298 }}
-          zoom={19}
-          mapContainerStyle={{ width: "100%", height: "100%" }}
+          zoom={mapZoom}
+          mapContainerStyle={{ width: "100%", height: "95vh" }}
           mapTypeId="satellite"
           options={{
-            tilt: 0, // Ensures map is in top-down (2D) view
-            heading: 0, // Ensures no rotation
+            tilt: 0,
+            heading: 0,
             disableDefaultUI: false,
             mapTypeControl: true,
             streetViewControl: false,
@@ -230,51 +276,6 @@ const MapComponent = () => {
         >
           {markerPosition && <Marker position={markerPosition} />}
         </GoogleMap>
-
-        <div
-          style={{
-            position: "absolute",
-            top: "80px",
-            left: "80px",
-            zIndex: 10,
-            display: "flex",
-            gap: "12px",
-          }}
-        >
-          <Autocomplete
-            onLoad={(auto) => (autocompleteRef.current = auto)}
-            onPlaceChanged={handlePlaceChanged}
-          >
-            <input
-              type="text"
-              placeholder="Search for a place"
-              style={{
-                width: "300px",
-                padding: "10px",
-                fontSize: "16px",
-                borderRadius: "5px",
-                boxShadow: "0 2px 10px rgba(0,0,0,0.2)",
-              }}
-            />
-          </Autocomplete>
-
-          <select
-            value={selectedMonth}
-            onChange={handleMonthChange}
-            style={{
-              padding: "10px",
-              fontSize: "16px",
-              borderRadius: "5px",
-              boxShadow: "0 2px 10px rgba(0,0,0,0.2)",
-            }}
-          >
-            {MONTHS.map((month) => (
-              <option key={month} value={month}>
-                {month}
-              </option>
-            ))}
-          </select>
-        </div>
 
         {selectedPlace && (
           <div
@@ -317,387 +318,533 @@ const MapComponent = () => {
             </p>
           </div>
         )}
-      </div>
 
-      {/* New Solar Calculator Card - ALWAYS VISIBLE */}
-      <div style={{ background: "#f5f5f5", color: "#222", padding: "30px", marginBottom: "40px" }}>
-        <h2 style={{ fontSize: "24px", fontWeight: "bold", textAlign: "center", marginBottom: "30px" }}>
-          Personal Solar Calculator
-        </h2>
-        
-        <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: "20px", marginBottom: "40px" }}>
-          <div style={{ display: "flex", flexDirection: "column", width: "300px" }}>
-            <label style={{ marginBottom: "8px", fontWeight: "500" }}>Panel Area (m²):</label>
-            <input
-              type="number"
-              min="0"
-              value={panelArea || ""}
-              onChange={handlePanelAreaChange}
-              placeholder="Enter panel area"
-              style={{
-                padding: "12px",
-                fontSize: "16px",
-                borderRadius: "5px",
-                border: "1px solid #ddd",
-              }}
-            />
-          </div>
-          
-          <div style={{ display: "flex", flexDirection: "column", width: "300px" }}>
-            <label style={{ marginBottom: "8px", fontWeight: "500" }}>Monthly Electricity Bill ($):</label>
-            <input
-              type="number"
-              min="0"
-              value={monthlyBill || ""}
-              onChange={handleMonthlyBillChange}
-              placeholder="Enter monthly bill"
-              style={{
-                padding: "12px",
-                fontSize: "16px",
-                borderRadius: "5px",
-                border: "1px solid #ddd",
-              }}
-            />
+        {/* Month Slider */}
+        <div
+          style={{
+            position: "absolute",
+            bottom: "20px",
+            left: "50%",
+            transform: "translateX(-50%)",
+            background: "rgba(255,255,255,0.9)",
+            padding: "10px 20px",
+            borderRadius: "5px",
+          }}
+        >
+          <input
+            type="range"
+            min="0"
+            max="11"
+            value={monthIndex}
+            onChange={handleMonthSliderChange}
+            style={{ width: "300px" }}
+          />
+          <div style={{ textAlign: "center", fontWeight: "bold" }}>
+            {selectedMonth}
           </div>
         </div>
-        
-        {panelArea > 0 && monthlyBill > 0 && (
-          <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-around", marginTop: "20px" }}>
-            <div style={{ textAlign: "center", margin: "15px", minWidth: "180px" }}>
-              <div style={{ fontSize: "40px" }}>⚡</div>
-              <div style={{ fontWeight: "bold", fontSize: "18px", marginBottom: "5px" }}>Annual Energy</div>
-              <div style={{ fontSize: "20px", color: "#0277bd" }}>{calculatedResults.annualEnergy} kWh</div>
-            </div>
-            
-            <div style={{ textAlign: "center", margin: "15px", minWidth: "180px" }}>
-              <div style={{ fontSize: "40px" }}>🌱</div>
-              <div style={{ fontWeight: "bold", fontSize: "18px", marginBottom: "5px" }}>Carbon Offset</div>
-              <div style={{ fontSize: "20px", color: "#2e7d32" }}>{calculatedResults.carbonOffset} tons</div>
-            </div>
-            
-            <div style={{ textAlign: "center", margin: "15px", minWidth: "180px" }}>
-              <div style={{ fontSize: "40px" }}>🌳</div>
-              <div style={{ fontWeight: "bold", fontSize: "18px", marginBottom: "5px" }}>Tree Equivalent</div>
-              <div style={{ fontSize: "20px", color: "#33691e" }}>{calculatedResults.treeEquivalent} trees</div>
-            </div>
-            
-            <div style={{ textAlign: "center", margin: "15px", minWidth: "180px" }}>
-              <div style={{ fontSize: "40px" }}>⚙️</div>
-              <div style={{ fontWeight: "bold", fontSize: "18px", marginBottom: "5px" }}>Monthly Saving</div>
-              <div style={{ fontSize: "20px", color: "#01579b" }}>{calculatedResults.monthlySavingKWh} kWh</div>
-            </div>
-            
-            <div style={{ textAlign: "center", margin: "15px", minWidth: "180px" }}>
-              <div style={{ fontSize: "40px" }}>💰</div>
-              <div style={{ fontWeight: "bold", fontSize: "18px", marginBottom: "5px" }}>Monthly $ Saving</div>
-              <div style={{ fontSize: "20px", color: "#1b5e20" }}>${calculatedResults.monthlySavingMoney}</div>
-            </div>
-          </div>
-        )}
-        
-        {!(panelArea > 0 && monthlyBill > 0) && (
-          <div style={{ textAlign: "center", padding: "30px", color: "#666" }}>
-            Enter panel area and monthly bill to see your potential savings
-          </div>
-        )}
-        
       </div>
 
-      {/* Visualization Section */}
-      {matchedData && (
-        <div style={{ background: "#f9f9f9", color: "#222", padding: "20px" }}>
-          <h2
+      {/* Right Column: Controls Panel */}
+      <div style={{ flex: 1, overflowY: "auto", background: "#f5f5f5", padding: "20px" }}>
+        {/* Location Search */}
+        <Autocomplete
+          onLoad={(auto) => (autocompleteRef.current = auto)}
+          onPlaceChanged={handlePlaceChanged}
+        >
+          <input
+            type="text"
+            placeholder="Search for a location"
             style={{
-              fontSize: "22px",
-              fontWeight: "bold",
-              textAlign: "center",
+              width: "100%",
+              padding: "10px",
+              fontSize: "16px",
+              borderRadius: "5px",
+              border: "1px solid #ddd",
+              marginBottom: "20px",
+            }}
+          />
+        </Autocomplete>
+
+        {/* Personal Solar Calculator Dropdown */}
+        <div style={{ marginBottom: "20px" }}>
+          <div
+            onClick={toggleCalculator}
+            style={{
+              background: "#0277bd",
+              color: "#fff",
+              padding: "10px",
+              borderRadius: "5px",
+              cursor: "pointer",
+              marginBottom: "10px",
+            }}
+          >
+            Personal Solar Calculator
+          </div>
+          {showCalculator && (
+            <div
+              style={{
+                background: "#fff",
+                padding: "15px",
+                borderRadius: "5px",
+                marginBottom: "20px",
+              }}
+            >
+              <div style={{ marginBottom: "15px" }}>
+                <label style={{ fontWeight: "900" }}>Panel Area (m²):</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={panelArea || ""}
+                  onChange={handlePanelAreaChange}
+                  placeholder="Enter panel area"
+                  style={{
+                    width: "100%",
+                    padding: "10px",
+                    fontSize: "16px",
+                    borderRadius: "5px",
+                    border: "1px solid #ddd",
+                    marginTop: "5px",
+                  }}
+                />
+              </div>
+              <div style={{ marginBottom: "15px" }}>
+                <label style={{ fontWeight: "900" }}>
+                  Monthly Electricity Bill ($):
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  value={monthlyBill || ""}
+                  onChange={handleMonthlyBillChange}
+                  placeholder="Enter monthly bill"
+                  style={{
+                    width: "100%",
+                    padding: "10px",
+                    fontSize: "16px",
+                    borderRadius: "5px",
+                    border: "1px solid #ddd",
+                    marginTop: "5px",
+                  }}
+                />
+              </div>
+              {(panelArea > 0 && monthlyBill > 0) ? (
+                <div style={{ textAlign: "center" }}>
+                  <div style={{ fontSize: "40px" }}>⚡</div>
+                  <div style={{ fontWeight: "bold", fontSize: "18px" }}>
+                    Annual Energy
+                  </div>
+                  <div style={{ fontSize: "20px", color: "#0277bd" }}>
+                    {calculatedResults.annualEnergy} kWh
+                  </div>
+                  <div style={{ fontSize: "40px", marginTop: "10px" }}>🌱</div>
+                  <div style={{ fontWeight: "bold", fontSize: "18px" }}>
+                    Carbon Offset
+                  </div>
+                  <div style={{ fontSize: "20px", color: "#2e7d32" }}>
+                    {calculatedResults.carbonOffset} tons/yr
+                  </div>
+                  <div style={{ fontSize: "40px", marginTop: "10px" }}>🌳</div>
+                  <div style={{ fontWeight: "bold", fontSize: "18px" }}>
+                    Tree Equivalent
+                  </div>
+                  <div style={{ fontSize: "20px", color: "#33691e" }}>
+                    {calculatedResults.treeEquivalent} trees/yr
+                  </div>
+                  <div style={{ fontSize: "40px", marginTop: "10px" }}>⚙️</div>
+                  <div style={{ fontWeight: "bold", fontSize: "18px" }}>
+                    Monthly Energy Saving
+                  </div>
+                  <div style={{ fontSize: "20px", color: "#01579b" }}>
+                    {calculatedResults.monthlySavingKWh} kWh
+                  </div>
+                  <div style={{ fontSize: "40px", marginTop: "10px" }}>💰</div>
+                  <div style={{ fontWeight: "bold", fontSize: "18px" }}>
+                    Monthly $ Saving
+                  </div>
+                  <div style={{ fontSize: "20px", color: "#1b5e20" }}>
+                    ${calculatedResults.monthlySavingMoney}
+                  </div>
+                </div>
+              ) : (
+                <div
+                  style={{
+                    textAlign: "center",
+                    padding: "20px",
+                    color: "#666",
+                  }}
+                >
+                  Enter panel area and monthly bill to see potential savings
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Estimated Solar Installation Potential Dropdown */}
+        <div style={{ marginBottom: "20px" }}>
+          <div
+            onClick={toggleInstallation}
+            style={{
+              background: "#f9a825",
+              color: "#222",
+              padding: "10px",
+              borderRadius: "5px",
+              cursor: "pointer",
+              marginBottom: "10px",
             }}
           >
             Estimated Solar Installation Potential
-          </h2>
-
-          {/* Summary Stats with Icons */}
-
-          <div
-            style={{
-              display: "flex",
-              flexWrap: "wrap",
-              justifyContent: "space-between",
-              marginTop: "20px",
-            }}
-          >
-            {/* Left Column */}
-
-            <div
-              style={{ display: "flex", flexDirection: "column", gap: "20px" }}
-            >
-              <div style={{ textAlign: "center" }}>
-                <div style={{ fontSize: "48px" }}>✅</div>
-
-                <div>
-                  <strong>Qualified Roofs</strong>
-                  <br />
-                  {Number(matchedData.percent_qualified).toFixed(2)}%
-                </div>
-              </div>
-
-              <div style={{ textAlign: "center" }}>
-                <div style={{ fontSize: "48px" }}>🏠</div>
-
-                <div>
-                  <strong>Total Roofs</strong>
-
-                  <br />
-
-                  {Number(matchedData.count_qualified).toLocaleString()}
-                </div>
-              </div>
-
-              <div style={{ textAlign: "center" }}>
-                <div style={{ fontSize: "48px" }}>📐</div>
-
-                <div>
-                  <strong>Roof Space</strong>
-                  <br />
-                  {(matchedData.total_area_sqft / 1e6).toFixed(2)}M sq ft
-                </div>
-              </div>
-            </div>
-
-            {/* Right Column */}
-
-            <div
-              style={{ display: "flex", flexDirection: "column", gap: "20px" }}
-            >
-              <div style={{ textAlign: "center" }}>
-                <div style={{ fontSize: "48px" }}>⚡</div>
-
-                <div>
-                  <strong>Capacity</strong>
-                  <br />
-                  {(matchedData.kw_total / 1000).toFixed(2)} MW DC
-                </div>
-              </div>
-
-              <div style={{ textAlign: "center" }}>
-                <div style={{ fontSize: "48px" }}>🔌</div>
-
-                <div>
-                  <strong>Electricity</strong>
-                  <br />
-                  {(matchedData.yearly_sunlight_kwh_total / 1000).toFixed(
-                    2
-                  )}{" "}
-                  MWh/yr
-                </div>
-              </div>
-
-              <div style={{ textAlign: "center" }}>
-                <div style={{ fontSize: "48px" }}>🌱</div>
-
-                <div>
-                  <strong>Carbon Offset</strong>
-                  <br />
-                  {Number(matchedData.carbon_offset_metric_tons).toFixed(
-                    2
-                  )}{" "}
-                  metric tons
-                </div>
-              </div>
-            </div>
           </div>
+          {showInstallation && matchedData && (
+            <div
+              style={{
+                background: "#fff",
+                padding: "15px",
+                borderRadius: "5px",
+              }}
+            >
+              {/* Removed summary header and stats */}
+              {/* Charts Section for Installation Potential */}
+              <div style={{ marginTop: "30px" }}>
+                <div style={{ height: "300px", marginBottom: "30px" }}>
+                  <h4 style={{ textAlign: "center" }}>Roof Qualification</h4>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        dataKey="value"
+                        data={[
+                          {
+                            name: "Qualified",
+                            value: Number(matchedData.percent_qualified),
+                          },
+                          {
+                            name: "Not Qualified",
+                            value: 100 - Number(matchedData.percent_qualified),
+                          },
+                        ]}
+                        outerRadius={85}
+                        label={({ name, value }) =>
+                          `${name}: ${value.toFixed(2)}%`
+                        }
+                      >
+                        {COLORS.map((color, i) => (
+                          <Cell key={i} fill={color} />
+                        ))}
+                      </Pie>
+                      <Tooltip formatter={(value) => `${Number(value).toFixed(2)}%`} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+                <div style={{ height: "300px" }}>
+                  <h4 style={{ textAlign: "center" }}>
+                    Total Installation Size by Roof Orientation
+                  </h4>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart
+                      data={[
+                        {
+                          name: "Flat",
+                          value: (matchedData.yearly_sunlight_kwh_f / 1e6).toFixed(2),
+                        },
+                        {
+                          name: "South",
+                          value: (matchedData.yearly_sunlight_kwh_s / 1e6).toFixed(2),
+                        },
+                        {
+                          name: "West",
+                          value: (matchedData.yearly_sunlight_kwh_w / 1e6).toFixed(2),
+                        },
+                        {
+                          name: "East",
+                          value: (matchedData.yearly_sunlight_kwh_e / 1e6).toFixed(2),
+                        },
+                        {
+                          name: "North",
+                          value: (matchedData.yearly_sunlight_kwh_n / 1e6).toFixed(2),
+                        },
+                      ]}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis
+                        dataKey="name"
+                        label={{
+                          value: "Roof Orientation",
+                          position: "insideBottom",
+                          offset: -5,
+                        }}
+                      />
+                      <YAxis
+                        label={{
+                          value: "MWh/year",
+                          angle: -90,
+                          position: "insideLeft",
+                        }}
+                      />
+                      <Tooltip />
+                      <Bar dataKey="value" fill="#f9a825" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+                {matchedData.install_size_kw_buckets_json && (
+                  <div
+                    style={{
+                      width: "100%",
+                      height: "300px",
+                      paddingBottom: "20px",
+                      marginTop: "30px",
+                    }}
+                  >
+                    <h4 style={{ textAlign: "center" }}>
+                      Rooftop Solar Capacity Distribution (&lt; 50kW)
+                    </h4>
+                    <ResponsiveContainer width="100%" height="90%">
+                      <BarChart
+                        data={JSON.parse(
+                          matchedData.install_size_kw_buckets_json
+                        ).map(([bucket, count]) => ({
+                          name: `${bucket}–${bucket + 5}`,
+                          value: Number(count).toFixed(2),
+                        }))}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis
+                          dataKey="name"
+                          label={{
+                            value: "Installation Size (kW)",
+                            position: "insideBottom",
+                            offset: -5,
+                          }}
+                        />
+                        <YAxis
+                          label={{
+                            value: "Number of Roofs",
+                            angle: -90,
+                            position: "insideLeft",
+                          }}
+                        />
+                        <Tooltip />
+                        <Bar dataKey="value" fill="#fbc02d" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          {!showInstallation && !matchedData && (
+            <div
+              style={{
+                textAlign: "center",
+                padding: "20px",
+                color: "#666",
+              }}
+            >
+              No installation data available.
+            </div>
+          )}
+        </div>
 
-          {/* Charts Section */}
-
+        {/* Solar Potential Analysis Dropdown */}
+        <div style={{ marginBottom: "20px" }}>
           <div
+            onClick={toggleAnalysis}
             style={{
-              display: "flex",
-              flexWrap: "wrap",
-              marginTop: "60px",
-              gap: "40px",
+              background: "#8e24aa",
+              color: "#fff",
+              padding: "10px",
+              borderRadius: "5px",
+              cursor: "pointer",
+              marginBottom: "10px",
             }}
           >
-            {/* Pie Chart */}
+            Solar Potential Analysis
+          </div>
+          {showAnalysis && (
+            <div
+              style={{
+                background: "#fff",
+                padding: "15px",
+                borderRadius: "5px",
+                marginBottom: "20px",
+              }}
+            >
+              {/* Analysis Input Fields */}
+              <div style={{ marginBottom: "15px" }}>
+                <label style={{ fontWeight: "900" }}>
+                  Average Monthly Energy Bill ($):
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  value={analysisMonthlyBill}
+                  onChange={handleAnalysisMonthlyBillChange}
+                  placeholder="Enter monthly bill"
+                  style={{
+                    width: "100%",
+                    padding: "10px",
+                    fontSize: "16px",
+                    borderRadius: "5px",
+                    border: "1px solid #ddd",
+                    marginTop: "5px",
+                  }}
+                />
+              </div>
+              <div style={{ marginBottom: "15px" }}>
+                <label style={{ fontWeight: "900" }}>Energy Cost per kWh ($):</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={energyCostPerKWh}
+                  onChange={handleEnergyCostChange}
+                  placeholder="Enter cost per kWh"
+                  style={{
+                    width: "100%",
+                    padding: "10px",
+                    fontSize: "16px",
+                    borderRadius: "5px",
+                    border: "1px solid #ddd",
+                    marginTop: "5px",
+                  }}
+                />
+              </div>
+              <div style={{ marginBottom: "15px" }}>
+                <label style={{ fontWeight: "900" }}>
+                  Solar Incentives (% discount):
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  value={solarIncentives}
+                  onChange={handleSolarIncentivesChange}
+                  placeholder="Enter incentive percentage"
+                  style={{
+                    width: "100%",
+                    padding: "10px",
+                    fontSize: "16px",
+                    borderRadius: "5px",
+                    border: "1px solid #ddd",
+                    marginTop: "5px",
+                  }}
+                />
+              </div>
+              <div style={{ marginBottom: "15px" }}>
+                <label style={{ fontWeight: "900" }}>
+                  Panel Capacity (Watts per panel):
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  value={panelCapacityWatts}
+                  onChange={handlePanelCapacityChange}
+                  placeholder="Enter panel capacity"
+                  style={{
+                    width: "100%",
+                    padding: "10px",
+                    fontSize: "16px",
+                    borderRadius: "5px",
+                    border: "1px solid #ddd",
+                    marginTop: "5px",
+                  }}
+                />
+              </div>
+              {/* Sliders for Panel Count and Installation Cost per Watt */}
+              <div style={{ marginBottom: "15px" }}>
+                <label style={{ fontWeight: "900" }}>Panel Count:</label>
+                <input
+                  type="range"
+                  min="1"
+                  max="50"
+                  value={panelCount}
+                  onChange={handlePanelCountChange}
+                  style={{ width: "100%" }}
+                />
+                <div style={{ textAlign: "center" }}>{panelCount}</div>
+              </div>
+              <div style={{ marginBottom: "15px" }}>
+                <label style={{ fontWeight: "900" }}>
+                  Installation Cost per Watt ($):
+                </label>
+                <input
+                  type="range"
+                  min="1"
+                  max="5"
+                  step="0.1"
+                  value={installationCostPerWatt}
+                  onChange={handleInstallationCostChange}
+                  style={{ width: "100%" }}
+                />
+                <div style={{ textAlign: "center" }}>
+                  {installationCostPerWatt.toFixed(2)}
+                </div>
+              </div>
 
-            <div style={{ flex: 1, minWidth: "300px", height: "300px" }}>
-              <h4 style={{ textAlign: "center" }}>Roof Qualification</h4>
+              {/* Display Analysis Results */}
+              <div style={{ marginBottom: "15px", textAlign: "center" }}>
+                <p>
+                  <strong>Yearly Energy Production:</strong>{" "}
+                  {yearlyProduction.toFixed(2)} kWh
+                </p>
+                <p>
+                  <strong>Total Capacity:</strong> {totalCapacityWatts} W
+                </p>
+                <p>
+                  <strong>Installation Cost (after incentives):</strong> $
+                  {netInstallationCost.toFixed(2)}
+                </p>
+                <p>
+                  <strong>Energy Covered:</strong>{" "}
+                  {(energyCoveredFraction * 100).toFixed(2)}%
+                </p>
+                <p>
+                  <strong>Break Even Year:</strong>{" "}
+                  {breakEvenYear !== null ? breakEvenYear : "Not within 20 years"}
+                </p>
+              </div>
 
-              <ResponsiveContainer width="100%" height="100%">
-                {" "}
-                <PieChart>
-                  {" "}
-                  <Pie
-                    dataKey="value"
-                    data={[
-                      {
-                        name: "Qualified",
-
-                        value: Number(matchedData.percent_qualified),
-                      },
-
-                      {
-                        name: "Not Qualified",
-
-                        value: 100 - Number(matchedData.percent_qualified),
-                      },
-                    ]}
-                    outerRadius={85}
-                    label={({ name, value }) => `${name}: ${value.toFixed(2)}%`}
-                  >
-                    {" "}
-                    {COLORS.map((color, i) => (
-                      <Cell key={i} fill={color} />
-                    ))}{" "}
-                  </Pie>{" "}
-                  <Tooltip
-                    formatter={(value) => `${Number(value).toFixed(2)}%`}
-                  />{" "}
-                </PieChart>{" "}
-              </ResponsiveContainer>
-            </div>
-
-            {/* Orientation Bar Chart */}
-
-            <div style={{ flex: 1, minWidth: "300px", height: "300px" }}>
-              <h4 style={{ textAlign: "center" }}>
-                Total Installation Size by Roof Orientation
-              </h4>
-
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart
-                  data={[
-                    {
-                      name: "Flat",
-
-                      value: (matchedData.yearly_sunlight_kwh_f / 1e6).toFixed(
-                        2
-                      ),
-                    },
-
-                    {
-                      name: "South",
-
-                      value: (matchedData.yearly_sunlight_kwh_s / 1e6).toFixed(
-                        2
-                      ),
-                    },
-
-                    {
-                      name: "West",
-
-                      value: (matchedData.yearly_sunlight_kwh_w / 1e6).toFixed(
-                        2
-                      ),
-                    },
-
-                    {
-                      name: "East",
-
-                      value: (matchedData.yearly_sunlight_kwh_e / 1e6).toFixed(
-                        2
-                      ),
-                    },
-
-                    {
-                      name: "North",
-
-                      value: (matchedData.yearly_sunlight_kwh_n / 1e6).toFixed(
-                        2
-                      ),
-                    },
-                  ]}
-                >
-                  <CartesianGrid strokeDasharray="3 3" />
-
-                  <XAxis
-                    dataKey="name"
-                    label={{
-                      value: "Roof Orientation",
-
-                      position: "insideBottom",
-
-                      offset: -5,
-                    }}
-                  />
-
-                  <YAxis
-                    label={{
-                      value: "MWh/year",
-
-                      angle: -90,
-
-                      position: "insideLeft",
-                    }}
-                  />
-
-                  <Tooltip />
-
-                  <Bar dataKey="value" fill="#f9a825" />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-
-            {/* Install Size Histogram */}
-
-            {matchedData.install_size_kw_buckets_json && (
-              <div
-                style={{
-                  width: "100%",
-
-                  height: "300px",
-
-                  paddingBottom: "20px",
-
-                  marginTop: "60px",
-                }}
-              >
-                <h4 style={{ textAlign: "center" }}>
-                  Rooftop Solar Capacity Distribution (&lt; 50kW)
-                </h4>
-
-                <ResponsiveContainer width="100%" height="90%">
-                  <BarChart
-                    data={JSON.parse(
-                      matchedData.install_size_kw_buckets_json
-                    ).map(([bucket, count]) => ({
-                      name: `${bucket}–${bucket + 5}`,
-
-                      value: Number(count).toFixed(2),
-                    }))}
-                  >
+              {/* Line Graph for 20-Year Cost Analysis */}
+              <div style={{ height: "300px" }}>
+                <h4 style={{ textAlign: "center" }}>20-Year Cost Analysis</h4>
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={analysisData}>
                     <CartesianGrid strokeDasharray="3 3" />
-
                     <XAxis
-                      dataKey="name"
-                      label={{
-                        value: "Installation Size (kW)",
-
-                        position: "insideBottom",
-
-                        offset: -5,
-                      }}
+                      dataKey="year"
+                      label={{ value: "Years", position: "insideBottom", offset: -5 }}
                     />
-
                     <YAxis
                       label={{
-                        value: "Number of Roofs",
-
+                        value: "Cost ($)",
                         angle: -90,
-
                         position: "insideLeft",
                       }}
                     />
-
-                    <Tooltip />
-
-                    <Bar dataKey="value" fill="#fbc02d" />
-                  </BarChart>
+                    <Tooltip formatter={(value) => `$${value.toFixed(2)}`} />
+                    <Line
+                      type="monotone"
+                      dataKey="costWithoutSolar"
+                      stroke="#d32f2f"
+                      name="Cost without Solar"
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="costWithSolar"
+                      stroke="#388e3c"
+                      name="Cost with Solar"
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="savings"
+                      stroke="#1976d2"
+                      name="Savings"
+                    />
+                  </LineChart>
                 </ResponsiveContainer>
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 };
