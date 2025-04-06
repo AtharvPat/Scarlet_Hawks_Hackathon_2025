@@ -43,11 +43,22 @@ const MapComponent = () => {
   const [matchedData, setMatchedData] = useState(null);
   const [selectedMonth, setSelectedMonth] = useState("May");
   const [predictionResult, setPredictionResult] = useState(null);
+  
+  // New state variables for calculator
+  const [panelArea, setPanelArea] = useState(25); // Default values to make testing easier
+  const [monthlyBill, setMonthlyBill] = useState(150); // Default values to make testing easier
+  const [calculatedResults, setCalculatedResults] = useState({
+    annualEnergy: 0,
+    carbonOffset: 0,
+    treeEquivalent: 0,
+    monthlySavingKWh: 0,
+    monthlySavingMoney: 0,
+  });
 
   const autocompleteRef = useRef(null);
 
   const { isLoaded } = useJsApiLoader({
-    googleMapsApiKey: "YOUR_GOOGLE_MAPS_API_KEY",
+    googleMapsApiKey: "Add your API key here",
     libraries: ["places"],
   });
 
@@ -62,6 +73,43 @@ const MapComponent = () => {
         })
       );
   }, []);
+
+  // New effect to calculate results whenever panel area, monthly bill or prediction result changes
+  useEffect(() => {
+    // Default prediction value if none available yet (for testing visibility)
+    const solarEnergyValue = predictionResult || 4.5; // Average value of 4.5 kWh/m² as fallback
+    
+    if (panelArea > 0 && monthlyBill > 0) {
+      // Assume average electricity rate of $0.15 per kWh
+      const electricityRate = 0.15;
+      
+      // Calculate monthly kWh usage from bill
+      const monthlyUsage = monthlyBill / electricityRate;
+      
+      // Calculate annual energy production based on panel area and predicted solar energy
+      const annualEnergy = panelArea * solarEnergyValue * 365;
+      
+      // Carbon offset calculation (0.85 lbs CO2 per kWh)
+      const carbonOffset = (annualEnergy * 0.85) / 2000; // Convert to tons
+      
+      // Tree equivalent (1 tree absorbs about 48 lbs of CO2 per year)
+      const treeEquivalent = Math.round((carbonOffset * 2000) / 48);
+      
+      // Monthly energy saving in kWh (capped at monthly usage)
+      const monthlySavingKWh = Math.min(annualEnergy / 12, monthlyUsage);
+      
+      // Monthly money saving
+      const monthlySavingMoney = monthlySavingKWh * electricityRate;
+      
+      setCalculatedResults({
+        annualEnergy: annualEnergy.toFixed(2),
+        carbonOffset: carbonOffset.toFixed(2),
+        treeEquivalent,
+        monthlySavingKWh: monthlySavingKWh.toFixed(2),
+        monthlySavingMoney: monthlySavingMoney.toFixed(2),
+      });
+    }
+  }, [panelArea, monthlyBill, predictionResult]);
 
   const getMonthFeatures = (monthLabel) => {
     const index = MONTHS.indexOf(monthLabel);
@@ -141,19 +189,28 @@ const MapComponent = () => {
     }
   };
 
+  // Handlers for new input fields
+  const handlePanelAreaChange = (e) => {
+    setPanelArea(parseFloat(e.target.value) || 0);
+  };
+
+  const handleMonthlyBillChange = (e) => {
+    setMonthlyBill(parseFloat(e.target.value) || 0);
+  };
+
   if (!isLoaded) return <div>Loading...</div>;
 
   return (
     <div
       style={{
-        height: selectedPlace ? "auto" : "100vh",
+        height: "auto", // Changed from conditional to always be auto
         display: "flex",
         flexDirection: "column",
       }}
     >
       <div
         style={{
-          height: selectedPlace ? "70vh" : "100vh",
+          height: "70vh", // Fixed height for map
           position: "relative",
         }}
       >
@@ -262,16 +319,97 @@ const MapComponent = () => {
         )}
       </div>
 
-      {/* Visualization Section */}
+      {/* New Solar Calculator Card - ALWAYS VISIBLE */}
+      <div style={{ background: "#f5f5f5", color: "#222", padding: "30px", marginBottom: "40px" }}>
+        <h2 style={{ fontSize: "24px", fontWeight: "bold", textAlign: "center", marginBottom: "30px" }}>
+          Personal Solar Calculator
+        </h2>
+        
+        <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: "20px", marginBottom: "40px" }}>
+          <div style={{ display: "flex", flexDirection: "column", width: "300px" }}>
+            <label style={{ marginBottom: "8px", fontWeight: "500" }}>Panel Area (m²):</label>
+            <input
+              type="number"
+              min="0"
+              value={panelArea || ""}
+              onChange={handlePanelAreaChange}
+              placeholder="Enter panel area"
+              style={{
+                padding: "12px",
+                fontSize: "16px",
+                borderRadius: "5px",
+                border: "1px solid #ddd",
+              }}
+            />
+          </div>
+          
+          <div style={{ display: "flex", flexDirection: "column", width: "300px" }}>
+            <label style={{ marginBottom: "8px", fontWeight: "500" }}>Monthly Electricity Bill ($):</label>
+            <input
+              type="number"
+              min="0"
+              value={monthlyBill || ""}
+              onChange={handleMonthlyBillChange}
+              placeholder="Enter monthly bill"
+              style={{
+                padding: "12px",
+                fontSize: "16px",
+                borderRadius: "5px",
+                border: "1px solid #ddd",
+              }}
+            />
+          </div>
+        </div>
+        
+        {panelArea > 0 && monthlyBill > 0 && (
+          <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-around", marginTop: "20px" }}>
+            <div style={{ textAlign: "center", margin: "15px", minWidth: "180px" }}>
+              <div style={{ fontSize: "40px" }}>⚡</div>
+              <div style={{ fontWeight: "bold", fontSize: "18px", marginBottom: "5px" }}>Annual Energy</div>
+              <div style={{ fontSize: "20px", color: "#0277bd" }}>{calculatedResults.annualEnergy} kWh</div>
+            </div>
+            
+            <div style={{ textAlign: "center", margin: "15px", minWidth: "180px" }}>
+              <div style={{ fontSize: "40px" }}>🌱</div>
+              <div style={{ fontWeight: "bold", fontSize: "18px", marginBottom: "5px" }}>Carbon Offset</div>
+              <div style={{ fontSize: "20px", color: "#2e7d32" }}>{calculatedResults.carbonOffset} tons</div>
+            </div>
+            
+            <div style={{ textAlign: "center", margin: "15px", minWidth: "180px" }}>
+              <div style={{ fontSize: "40px" }}>🌳</div>
+              <div style={{ fontWeight: "bold", fontSize: "18px", marginBottom: "5px" }}>Tree Equivalent</div>
+              <div style={{ fontSize: "20px", color: "#33691e" }}>{calculatedResults.treeEquivalent} trees</div>
+            </div>
+            
+            <div style={{ textAlign: "center", margin: "15px", minWidth: "180px" }}>
+              <div style={{ fontSize: "40px" }}>⚙️</div>
+              <div style={{ fontWeight: "bold", fontSize: "18px", marginBottom: "5px" }}>Monthly Saving</div>
+              <div style={{ fontSize: "20px", color: "#01579b" }}>{calculatedResults.monthlySavingKWh} kWh</div>
+            </div>
+            
+            <div style={{ textAlign: "center", margin: "15px", minWidth: "180px" }}>
+              <div style={{ fontSize: "40px" }}>💰</div>
+              <div style={{ fontWeight: "bold", fontSize: "18px", marginBottom: "5px" }}>Monthly $ Saving</div>
+              <div style={{ fontSize: "20px", color: "#1b5e20" }}>${calculatedResults.monthlySavingMoney}</div>
+            </div>
+          </div>
+        )}
+        
+        {!(panelArea > 0 && monthlyBill > 0) && (
+          <div style={{ textAlign: "center", padding: "30px", color: "#666" }}>
+            Enter panel area and monthly bill to see your potential savings
+          </div>
+        )}
+        
+      </div>
 
+      {/* Visualization Section */}
       {matchedData && (
         <div style={{ background: "#f9f9f9", color: "#222", padding: "20px" }}>
           <h2
             style={{
               fontSize: "22px",
-
               fontWeight: "bold",
-
               textAlign: "center",
             }}
           >
@@ -283,11 +421,8 @@ const MapComponent = () => {
           <div
             style={{
               display: "flex",
-
               flexWrap: "wrap",
-
               justifyContent: "space-between",
-
               marginTop: "20px",
             }}
           >
@@ -377,11 +512,8 @@ const MapComponent = () => {
           <div
             style={{
               display: "flex",
-
               flexWrap: "wrap",
-
               marginTop: "60px",
-
               gap: "40px",
             }}
           >
