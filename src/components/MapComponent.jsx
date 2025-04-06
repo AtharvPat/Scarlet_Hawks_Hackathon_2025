@@ -69,7 +69,7 @@ const MapComponent = () => {
   const autocompleteRef = useRef(null);
 
   const { isLoaded } = useJsApiLoader({
-    googleMapsApiKey: "Put-your-API-Key-Here",
+    googleMapsApiKey: "ADD-YOUR-API-KEY",
     libraries: ["places"],
   });
 
